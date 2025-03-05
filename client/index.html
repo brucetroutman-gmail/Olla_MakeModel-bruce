@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Modelfile Builder</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <h1>Ollama Modelfile Builder</h1>
+    <form id="modelfileForm">
+        <label for="modelName">New Model Name:</label>
+        <input type="text" id="modelName" required><br>
+
+        <label for="fromModel">FROM (Base Model):</label>
+        <input type="text" id="fromModel" placeholder="e.g., llama3" required><br>
+
+        <label for="systemPrompt">SYSTEM Prompt:</label>
+        <textarea id="systemPrompt" placeholder="Enter system prompt"></textarea><br>
+
+        <label for="parameters">PARAMETER (e.g., temperature 0.8):</label>
+        <textarea id="parameters" placeholder="Enter parameters, one per line"></textarea><br>
+
+        <label for="files">Attach Files (e.g., safetensors):</label>
+        <input type="file" id="files" multiple><br>
+
+        <button type="submit">Create Model</button>
+    </form>
+    <div id="response"></div>
+    <script type="module" src="script.mjs"></script>
+</body>
+</html>
