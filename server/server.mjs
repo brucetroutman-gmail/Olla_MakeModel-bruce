@@ -8,8 +8,8 @@ import path from 'path';
 const execPromise = promisify(exec);
 
 const server = createServer(async (req, res) => {
-    const { pathname } = parse(req.url);
-    const normalizedPath = pathname.replace(/\/+$/, '');
+    const { pathname } = parse(req.url, true); // Ensure URL is parsed correctly
+    const normalizedPath = pathname.replace(/^\/+|\/+$/g, ''); // Remove leading/trailing slashes
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -21,7 +21,7 @@ const server = createServer(async (req, res) => {
         return;
     }
 
-    if (normalizedPath === '/create-model' && req.method === 'POST') {
+    if (normalizedPath === 'create-model' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
@@ -53,7 +53,6 @@ const server = createServer(async (req, res) => {
 
                 await fs.unlink(tempFile);
 
-                // Check stdout for success confirmation
                 const successMessage = stdout.includes('success') ? 'Model created successfully' : 'Model creation completed';
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ message: successMessage, modelfile }));
@@ -63,9 +62,41 @@ const server = createServer(async (req, res) => {
                 res.end(JSON.stringify({ error: error.message }));
             }
         });
-    } else if (normalizedPath === '' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('Server is running. Use the client at /client/index.html to create models.');
+    } else if (req.method === 'GET') {
+        // Serve static files from the client directory
+        let filePath;
+        if (normalizedPath === '') {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('Server is running. Use the client at /client/index.html to create models.');
+            return;
+        } else if (normalizedPath.startsWith('client')) {
+            filePath = path.join(process.cwd(), normalizedPath); // e.g., /client/index.html
+        } else {
+            filePath = path.join(process.cwd(), 'client', normalizedPath || 'index.html'); // Fallback to index.html
+        }
+
+        try {
+            const stats = await fs.stat(filePath);
+            if (stats.isFile()) {
+                const ext = path.extname(filePath).toLowerCase();
+                const contentType = {
+                    '.html': 'text/html',
+                    '.mjs': 'application/javascript',
+                    '.css': 'text/css',
+                    '.ico': 'image/x-icon'
+                }[ext] || 'application/octet-stream';
+
+                const fileContent = await fs.readFile(filePath);
+                res.writeHead(200, { 'Content-Type': contentType });
+                res.end(fileContent);
+            } else {
+                throw new Error('Not a file');
+            }
+        } catch (error) {
+            console.log(`404: ${req.method} ${pathname}`);
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Not Found' }));
+        }
     } else {
         console.log(`404: ${req.method} ${pathname}`);
         res.writeHead(404, { 'Content-Type': 'application/json' });
