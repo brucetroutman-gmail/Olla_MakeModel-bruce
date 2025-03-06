@@ -1,9 +1,11 @@
 import { createServer } from 'http';
 import { parse } from 'url';
-import { formidable } from 'formidable';
-import fetch from 'node-fetch';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
+import path from 'path';
 
-const OLLAMA_API_URL = 'http://localhost:11434/api/create';
+const execPromise = promisify(exec);
 
 const server = createServer(async (req, res) => {
     const { pathname } = parse(req.url);
@@ -20,18 +22,10 @@ const server = createServer(async (req, res) => {
     }
 
     if (normalizedPath === '/create-model' && req.method === 'POST') {
-        const form = formidable({ multiples: true });
-        
-        form.parse(req, async (err, fields, files) => {
-            if (err) {
-                console.error('Form parsing error:', err);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Form parsing error' }));
-                return;
-            }
-
-            const name = Array.isArray(fields.name) ? fields.name[0] : fields.name;
-            const modelfile = Array.isArray(fields.modelfile) ? fields.modelfile[0] : fields.modelfile;
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            const { name, modelfile } = JSON.parse(body);
             console.log('Received:', { name, modelfile });
 
             if (!name || !modelfile) {
@@ -42,26 +36,27 @@ const server = createServer(async (req, res) => {
             }
 
             try {
-                console.log('Sending to Ollama:', JSON.stringify({ name, modelfile }, null, 2));
-                const ollamaResponse = await fetch(OLLAMA_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, modelfile })
-                });
+                const tempFile = path.join(process.cwd(), `${name}_temp.modelfile`);
+                await fs.writeFile(tempFile, modelfile);
+                console.log('Wrote modelfile to:', tempFile);
 
-                const responseText = await ollamaResponse.text();
-                console.log('Ollama response status:', ollamaResponse.status);
-                console.log('Ollama response body:', responseText);
-
-                if (!ollamaResponse.ok) {
-                    console.error('Ollama API error:', responseText);
-                    res.writeHead(ollamaResponse.status, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: responseText }));
-                    return;
+                const { stdout, stderr } = await execPromise(`ollama create ${name} -f ${tempFile}`);
+                console.log('Ollama create stdout:', stdout);
+                if (stderr) {
+                    console.error('Ollama create stderr:', stderr);
+                    if (stderr.includes('error')) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Failed to create model: ' + stderr }));
+                        return;
+                    }
                 }
 
+                await fs.unlink(tempFile);
+
+                // Check stdout for success confirmation
+                const successMessage = stdout.includes('success') ? 'Model created successfully' : 'Model creation completed';
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ message: 'Model created successfully' }));
+                res.end(JSON.stringify({ message: successMessage, modelfile }));
             } catch (error) {
                 console.error('Server error:', error.message);
                 res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -78,6 +73,6 @@ const server = createServer(async (req, res) => {
     }
 });
 
-server.listen(3000, () => {
-    console.log('Server running at http://localhost:3000');
+server.listen(3021, () => {
+    console.log('Server running at http://localhost:3021');
 });
