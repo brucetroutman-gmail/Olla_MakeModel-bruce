@@ -4,5 +4,8 @@
     "type": "module",
     "scripts": {
         "start": "node server/server.mjs"
+    },
+    "dependencies": {
+        "formidable": "^3.5.2"
     }
 }

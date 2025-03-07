@@ -7,22 +7,25 @@ const filesInput = document.getElementById('files');
 const modelNameInput = document.getElementById('modelName');
 
 // Set default values
-const defaultSystem = `---TEXT START---\n{{filecontent "constitution-bt.txt"}}\n---TEXT END---\nUse ONLY the text between ---TEXT START--- and ---TEXT END--- to answer questions. If the answer isn’t there, say EXACTLY: "Sorry, I can't find that information in the document text."`;
+const defaultSystem = `---TEXT START---\n{{filecontent "{{FILENAME}}"}}n---TEXT END---\nUse ONLY the text between ---TEXT START--- and ---TEXT END--- to answer questions. If the answer isn’t there, say EXACTLY: "Sorry, I can't find that information in the document text."`;
 const defaultParameters = `PARAMETER temperature 0.0\nPARAMETER top_p 0.1\nPARAMETER top_k 10`;
 
 systemPrompt.value = defaultSystem;
 parameters.value = defaultParameters;
 
-// Fetch base models from Ollama
+// Fetch base models from Ollama, excluding those with dashes
 async function populateBaseModels() {
     try {
         const response = await fetch('http://localhost:11434/api/tags');
         const data = await response.json();
         data.models.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.name;
-            option.text = model.name;
-            fromModel.appendChild(option);
+            // Skip models with dashes in their names
+            if (!model.name.includes('-')) {
+                const option = document.createElement('option');
+                option.value = model.name;
+                option.text = model.name;
+                fromModel.appendChild(option);
+            }
         });
         const llama3Option = Array.from(fromModel.options).find(opt => opt.value.includes('llama3'));
         if (llama3Option) fromModel.value = llama3Option.value;
@@ -68,21 +71,27 @@ form.addEventListener('submit', async (event) => {
     const from = fromModel.value;
     const systemPromptValue = systemPrompt.value;
     const parametersValue = parameters.value;
-    const files = filesInput.files;
+    const file = filesInput.files[0];
 
-    if (!files.length) {
+    if (!file) {
         responseDiv.textContent = 'Error: A document file is required.';
         return;
     }
 
-    // Build modelfile without embedding file content
-    const modelfileContent = buildModelfile(from, systemPromptValue, parametersValue);
+    // Use the uploaded file's name in the modelfile
+    const fileName = file.name;
+    const modelfileContent = buildModelfile(from, systemPromptValue, parametersValue, fileName);
+
+    // Send file and modelfile content via FormData
+    const formData = new FormData();
+    formData.append('name', modelName);
+    formData.append('modelfile', modelfileContent);
+    formData.append('textFile', file);
 
     try {
         const response = await fetch('http://localhost:3021/create-model', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: modelName, modelfile: modelfileContent })
+            body: formData
         });
 
         const result = await response.json();
@@ -98,9 +107,11 @@ form.addEventListener('submit', async (event) => {
     }
 });
 
-function buildModelfile(from, system, parameters) {
+function buildModelfile(from, system, parameters, fileName) {
+    // Replace {{FILENAME}} with the actual uploaded file name
+    const systemWithFile = system.replace('{{FILENAME}}', fileName);
     let content = `FROM ${from}\n`;
-    content += `SYSTEM """${system}"""\n`;
+    content += `SYSTEM """${systemWithFile}"""\n`;
     content += `${parameters}\n`;
     return content;
 }

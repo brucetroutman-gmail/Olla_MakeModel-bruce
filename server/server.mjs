@@ -4,12 +4,13 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
+import formidable from 'formidable';
 
 const execPromise = promisify(exec);
 
 const server = createServer(async (req, res) => {
-    const { pathname } = parse(req.url, true); // Ensure URL is parsed correctly
-    const normalizedPath = pathname.replace(/^\/+|\/+$/g, ''); // Remove leading/trailing slashes
+    const { pathname } = parse(req.url, true);
+    const normalizedPath = pathname.replace(/^\/+|\/+$/g, '');
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -22,33 +23,37 @@ const server = createServer(async (req, res) => {
     }
 
     if (normalizedPath === 'create-model' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            const { name, modelfile } = JSON.parse(body);
-            console.log('Received:', { name, modelfile });
+        const form = formidable({ uploadDir: path.join(process.cwd()), keepExtensions: true });
+        form.parse(req, async (err, fields, files) => {
+            if (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Failed to parse form' }));
+                return;
+            }
 
-            if (!name || !modelfile) {
-                console.error('Missing required fields');
+            const name = fields.name?.[0];
+            const modelfile = fields.modelfile?.[0];
+            const textFile = files.textFile?.[0];
+
+            if (!name || !modelfile || !textFile) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Name and modelfile are required' }));
+                res.end(JSON.stringify({ error: 'Name, modelfile, and text file are required' }));
                 return;
             }
 
             try {
+                // Move uploaded file to project root with original name
+                const textFilePath = path.join(process.cwd(), textFile.originalFilename);
+                await fs.rename(textFile.filepath, textFilePath);
+
                 const tempFile = path.join(process.cwd(), `${name}_temp.modelfile`);
                 await fs.writeFile(tempFile, modelfile);
-                console.log('Wrote modelfile to:', tempFile);
 
                 const { stdout, stderr } = await execPromise(`ollama create ${name} -f ${tempFile}`);
-                console.log('Ollama create stdout:', stdout);
-                if (stderr) {
-                    console.error('Ollama create stderr:', stderr);
-                    if (stderr.includes('error')) {
-                        res.writeHead(500, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ error: 'Failed to create model: ' + stderr }));
-                        return;
-                    }
+                if (stderr && stderr.includes('error')) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Failed to create model: ' + stderr }));
+                    return;
                 }
 
                 await fs.unlink(tempFile);
@@ -57,22 +62,20 @@ const server = createServer(async (req, res) => {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ message: successMessage, modelfile }));
             } catch (error) {
-                console.error('Server error:', error.message);
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: error.message }));
             }
         });
     } else if (req.method === 'GET') {
-        // Serve static files from the client directory
         let filePath;
         if (normalizedPath === '') {
             res.writeHead(200, { 'Content-Type': 'text/plain' });
             res.end('Server is running. Use the client at /client/index.html to create models.');
             return;
         } else if (normalizedPath.startsWith('client')) {
-            filePath = path.join(process.cwd(), normalizedPath); // e.g., /client/index.html
+            filePath = path.join(process.cwd(), normalizedPath);
         } else {
-            filePath = path.join(process.cwd(), 'client', normalizedPath || 'index.html'); // Fallback to index.html
+            filePath = path.join(process.cwd(), 'client', normalizedPath || 'index.html');
         }
 
         try {
