@@ -7,7 +7,7 @@ const filesInput = document.getElementById('files');
 const modelNameInput = document.getElementById('modelName');
 
 // Set default values
-const defaultSystem = `---TEXT START---\n{{DOCUMENT_TEXT}}\n---TEXT END---\nUse ONLY the text between ---TEXT START--- and ---TEXT END--- to answer questions. If the answer isn’t there, say EXACTLY: "Sorry, I can't find that information in the document text."`;
+const defaultSystem = `---TEXT START---\n{{filecontent "constitution-bt.txt"}}\n---TEXT END---\nUse ONLY the text between ---TEXT START--- and ---TEXT END--- to answer questions. If the answer isn’t there, say EXACTLY: "Sorry, I can't find that information in the document text."`;
 const defaultParameters = `PARAMETER temperature 0.0\nPARAMETER top_p 0.1\nPARAMETER top_k 10`;
 
 systemPrompt.value = defaultSystem;
@@ -24,7 +24,6 @@ async function populateBaseModels() {
             option.text = model.name;
             fromModel.appendChild(option);
         });
-        // Set default to llama3 if available
         const llama3Option = Array.from(fromModel.options).find(opt => opt.value.includes('llama3'));
         if (llama3Option) fromModel.value = llama3Option.value;
     } catch (error) {
@@ -33,10 +32,10 @@ async function populateBaseModels() {
     }
 }
 
-// Generate dynamic model name, removing :latest from base model
+// Generate dynamic model name
 function generateModelName(from, fileName, params) {
-    const baseModel = from.split(':')[0]; // Remove :latest or any tag
-    const docName = fileName.split('.').slice(0, -1).join('').substring(0, 10); // First 10 chars, no extension
+    const baseModel = from.split(':')[0];
+    const docName = fileName.split('.').slice(0, -1).join('').substring(0, 10);
     const paramLines = params.split('\n');
     const temp = paramLines.find(line => line.includes('temperature'))?.split(' ')[2] || '0.0';
     const topP = paramLines.find(line => line.includes('top_p'))?.split(' ')[2] || '0.1';
@@ -76,37 +75,32 @@ form.addEventListener('submit', async (event) => {
         return;
     }
 
-    const fileReader = new FileReader();
-    fileReader.onload = async (e) => {
-        const fileContent = e.target.result;
-        const modelfileContent = buildModelfile(from, systemPromptValue, parametersValue, fileContent);
+    // Build modelfile without embedding file content
+    const modelfileContent = buildModelfile(from, systemPromptValue, parametersValue);
 
-        try {
-            const response = await fetch('http://localhost:3021/create-model', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: modelName, modelfile: modelfileContent })
-            });
+    try {
+        const response = await fetch('http://localhost:3021/create-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: modelName, modelfile: modelfileContent })
+        });
 
-            const result = await response.json();
-            if (response.ok) {
-                responseDiv.innerHTML = `${result.message}<br>Run it with: <code>ollama run ${modelName}</code>`;
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                responseDiv.innerHTML += `<br><br><strong>Modelfile:</strong><br><pre>${result.modelfile}</pre>`;
-            } else {
-                responseDiv.textContent = `Error: ${result.error}`;
-            }
-        } catch (error) {
-            responseDiv.textContent = `Error: ${error.message}`;
+        const result = await response.json();
+        if (response.ok) {
+            responseDiv.innerHTML = `${result.message}<br>Run it with: <code>ollama run ${modelName}</code>`;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            responseDiv.innerHTML += `<br><br><strong>Modelfile:</strong><br><pre>${result.modelfile}</pre>`;
+        } else {
+            responseDiv.textContent = `Error: ${result.error}`;
         }
-    };
-    fileReader.readAsText(files[0]);
+    } catch (error) {
+        responseDiv.textContent = `Error: ${error.message}`;
+    }
 });
 
-function buildModelfile(from, system, parameters, fileContent) {
-    const systemWithContent = system.replace('{{DOCUMENT_TEXT}}', fileContent);
+function buildModelfile(from, system, parameters) {
     let content = `FROM ${from}\n`;
-    content += `SYSTEM """${systemWithContent}"""\n`;
+    content += `SYSTEM """${system}"""\n`;
     content += `${parameters}\n`;
     return content;
 }
